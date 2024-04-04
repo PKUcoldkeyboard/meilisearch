@@ -947,7 +947,12 @@ impl<'a, 't, 'i> Settings<'a, 't, 'i> {
                     match joined {
                         // updated config
                         EitherOrBoth::Both((name, mut old), (_, new)) => {
-                            changed |= old.apply(new);
+                            changed |= EmbeddingSettings::apply_and_need_reindex(&mut old, new);
+                            if changed {
+                                tracing::debug!(embedder = name, "need reindex");
+                            } else {
+                                tracing::debug!(embedder = name, "skip reindex");
+                            }
                             let new = validate_embedding_settings(old, &name)?;
                             new_configs.insert(name, new);
                         }
@@ -1281,6 +1286,7 @@ fn validate_prompt(
             path_to_embeddings,
             embedding_object,
             input_type,
+            distribution,
         }) => {
             // validate
             let template = crate::prompt::Prompt::new(template)
@@ -1300,6 +1306,7 @@ fn validate_prompt(
                 path_to_embeddings,
                 embedding_object,
                 input_type,
+                distribution,
             }))
         }
         new => Ok(new),
@@ -1325,6 +1332,7 @@ pub fn validate_embedding_settings(
         path_to_embeddings,
         embedding_object,
         input_type,
+        distribution,
     } = settings;
 
     if let Some(0) = dimensions.set() {
@@ -1356,6 +1364,7 @@ pub fn validate_embedding_settings(
             path_to_embeddings,
             embedding_object,
             input_type,
+            distribution,
         }));
     };
     match inferred_source {
@@ -1500,6 +1509,7 @@ pub fn validate_embedding_settings(
         path_to_embeddings,
         embedding_object,
         input_type,
+        distribution,
     }))
 }
 

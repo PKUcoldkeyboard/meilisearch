@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use deserr::{DeserializeError, Deserr};
 use ordered_float::OrderedFloat;
 use serde::{Deserialize, Serialize};
 
@@ -142,7 +143,7 @@ impl EmbeddingConfigs {
 
     /// Get the default embedder configuration, if any.
     pub fn get_default(&self) -> Option<(Arc<Embedder>, Arc<Prompt>)> {
-        self.get_default_embedder_name().and_then(|default| self.get(&default))
+        self.get(self.get_default_embedder_name())
     }
 
     /// Get the name of the default embedder configuration.
@@ -152,14 +153,14 @@ impl EmbeddingConfigs {
     /// - If there is only one embedder, it is always the default.
     /// - If there are multiple embedders and one of them is called `default`, then that one is the default embedder.
     /// - In all other cases, there is no default embedder.
-    pub fn get_default_embedder_name(&self) -> Option<String> {
+    pub fn get_default_embedder_name(&self) -> &str {
         let mut it = self.0.keys();
         let first_name = it.next();
         let second_name = it.next();
         match (first_name, second_name) {
-            (None, _) => None,
-            (Some(first), None) => Some(first.to_owned()),
-            (Some(_), Some(_)) => Some("default".to_owned()),
+            (None, _) => "default",
+            (Some(first), None) => first,
+            (Some(_), Some(_)) => "default",
         }
     }
 }
@@ -236,6 +237,17 @@ impl Embedder {
         }
     }
 
+    pub fn embed_one(&self, text: String) -> std::result::Result<Embedding, EmbedError> {
+        let mut embeddings = self.embed(vec![text])?;
+        let embeddings = embeddings.pop().ok_or_else(EmbedError::missing_embedding)?;
+        Ok(if embeddings.iter().nth(1).is_some() {
+            tracing::warn!("Ignoring embeddings past the first one in long search query");
+            embeddings.iter().next().unwrap().to_vec()
+        } else {
+            embeddings.into_inner()
+        })
+    }
+
     /// Embed multiple chunks of texts.
     ///
     /// Each chunk is composed of one or multiple texts.
@@ -292,7 +304,7 @@ impl Embedder {
             Embedder::HuggingFace(embedder) => embedder.distribution(),
             Embedder::OpenAi(embedder) => embedder.distribution(),
             Embedder::Ollama(embedder) => embedder.distribution(),
-            Embedder::UserProvided(_embedder) => None,
+            Embedder::UserProvided(embedder) => embedder.distribution(),
             Embedder::Rest(embedder) => embedder.distribution(),
         }
     }
@@ -317,10 +329,50 @@ pub struct DistributionShift {
     pub current_sigma: OrderedFloat<f32>,
 }
 
-#[derive(Serialize, Deserialize)]
+impl<E> Deserr<E> for DistributionShift
+where
+    E: DeserializeError,
+{
+    fn deserialize_from_value<V: deserr::IntoValue>(
+        value: deserr::Value<V>,
+        location: deserr::ValuePointerRef,
+    ) -> Result<Self, E> {
+        let value = DistributionShiftSerializable::deserialize_from_value(value, location)?;
+        if value.mean < 0. || value.mean > 1. {
+            return Err(deserr::take_cf_content(E::error::<std::convert::Infallible>(
+                None,
+                deserr::ErrorKind::Unexpected {
+                    msg: format!(
+                        "the distribution mean must be in the range [0, 1], got {}",
+                        value.mean
+                    ),
+                },
+                location,
+            )));
+        }
+        if value.sigma <= 0. || value.sigma > 1. {
+            return Err(deserr::take_cf_content(E::error::<std::convert::Infallible>(
+                None,
+                deserr::ErrorKind::Unexpected {
+                    msg: format!(
+                        "the distribution sigma must be in the range ]0, 1], got {}",
+                        value.sigma
+                    ),
+                },
+                location,
+            )));
+        }
+
+        Ok(value.into())
+    }
+}
+
+#[derive(Serialize, Deserialize, Deserr)]
+#[serde(deny_unknown_fields)]
+#[deserr(deny_unknown_fields)]
 struct DistributionShiftSerializable {
-    current_mean: f32,
-    current_sigma: f32,
+    mean: f32,
+    sigma: f32,
 }
 
 impl From<DistributionShift> for DistributionShiftSerializable {
@@ -330,18 +382,13 @@ impl From<DistributionShift> for DistributionShiftSerializable {
             current_sigma: OrderedFloat(current_sigma),
         }: DistributionShift,
     ) -> Self {
-        Self { current_mean, current_sigma }
+        Self { mean: current_mean, sigma: current_sigma }
     }
 }
 
 impl From<DistributionShiftSerializable> for DistributionShift {
-    fn from(
-        DistributionShiftSerializable { current_mean, current_sigma }: DistributionShiftSerializable,
-    ) -> Self {
-        Self {
-            current_mean: OrderedFloat(current_mean),
-            current_sigma: OrderedFloat(current_sigma),
-        }
+    fn from(DistributionShiftSerializable { mean, sigma }: DistributionShiftSerializable) -> Self {
+        Self { current_mean: OrderedFloat(mean), current_sigma: OrderedFloat(sigma) }
     }
 }
 

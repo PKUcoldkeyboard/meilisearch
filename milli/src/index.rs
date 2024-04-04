@@ -1516,14 +1516,6 @@ impl Index {
             .unwrap_or_default())
     }
 
-    pub fn default_embedding_name(&self, rtxn: &RoTxn<'_>) -> Result<String> {
-        let configs = self.embedding_configs(rtxn)?;
-        Ok(match configs.as_slice() {
-            [(ref first_name, _)] => first_name.clone(),
-            _ => "default".to_owned(),
-        })
-    }
-
     pub(crate) fn put_search_cutoff(&self, wtxn: &mut RwTxn<'_>, cutoff: u64) -> heed::Result<()> {
         self.main.remap_types::<Str, BEU64>().put(wtxn, main_key::SEARCH_CUTOFF, &cutoff)
     }
@@ -2452,6 +2444,7 @@ pub(crate) mod tests {
             document_scores: _,
             mut documents_ids,
             degraded: _,
+            used_negative_operator: _,
         } = search.execute().unwrap();
         let primary_key_id = index.fields_ids_map(&rtxn).unwrap().id("primary_key").unwrap();
         documents_ids.sort_unstable();

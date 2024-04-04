@@ -185,6 +185,110 @@ async fn phrase_search_with_stop_word() {
         .await;
 }
 
+#[actix_rt::test]
+async fn negative_phrase_search() {
+    let server = Server::new().await;
+    let index = server.index("test");
+
+    let documents = DOCUMENTS.clone();
+    index.add_documents(documents, None).await;
+    index.wait_task(0).await;
+
+    index
+        .search(json!({"q": "-\"train your dragon\"" }), |response, code| {
+            assert_eq!(code, 200, "{}", response);
+            let hits = response["hits"].as_array().unwrap();
+            assert_eq!(hits.len(), 4);
+            assert_eq!(hits[0]["id"], "287947");
+            assert_eq!(hits[1]["id"], "299537");
+            assert_eq!(hits[2]["id"], "522681");
+            assert_eq!(hits[3]["id"], "450465");
+        })
+        .await;
+}
+
+#[actix_rt::test]
+async fn negative_word_search() {
+    let server = Server::new().await;
+    let index = server.index("test");
+
+    let documents = DOCUMENTS.clone();
+    index.add_documents(documents, None).await;
+    index.wait_task(0).await;
+
+    index
+        .search(json!({"q": "-escape" }), |response, code| {
+            assert_eq!(code, 200, "{}", response);
+            let hits = response["hits"].as_array().unwrap();
+            assert_eq!(hits.len(), 4);
+            assert_eq!(hits[0]["id"], "287947");
+            assert_eq!(hits[1]["id"], "299537");
+            assert_eq!(hits[2]["id"], "166428");
+            assert_eq!(hits[3]["id"], "450465");
+        })
+        .await;
+
+    // Everything that contains derivates of escape but not escape: nothing
+    index
+        .search(json!({"q": "-escape escape" }), |response, code| {
+            assert_eq!(code, 200, "{}", response);
+            let hits = response["hits"].as_array().unwrap();
+            assert_eq!(hits.len(), 0);
+        })
+        .await;
+}
+
+#[actix_rt::test]
+async fn non_negative_search() {
+    let server = Server::new().await;
+    let index = server.index("test");
+
+    let documents = DOCUMENTS.clone();
+    index.add_documents(documents, None).await;
+    index.wait_task(0).await;
+
+    index
+        .search(json!({"q": "- escape" }), |response, code| {
+            assert_eq!(code, 200, "{}", response);
+            let hits = response["hits"].as_array().unwrap();
+            assert_eq!(hits.len(), 1);
+            assert_eq!(hits[0]["id"], "522681");
+        })
+        .await;
+
+    index
+        .search(json!({"q": "- \"train your dragon\"" }), |response, code| {
+            assert_eq!(code, 200, "{}", response);
+            let hits = response["hits"].as_array().unwrap();
+            assert_eq!(hits.len(), 1);
+            assert_eq!(hits[0]["id"], "166428");
+        })
+        .await;
+}
+
+#[actix_rt::test]
+async fn negative_special_cases_search() {
+    let server = Server::new().await;
+    let index = server.index("test");
+
+    let documents = DOCUMENTS.clone();
+    index.add_documents(documents, None).await;
+    index.wait_task(0).await;
+
+    index.update_settings(json!({"synonyms": { "escape": ["glass"] }})).await;
+    index.wait_task(1).await;
+
+    // There is a synonym for escape -> glass but we don't want "escape", only the derivates: glass
+    index
+        .search(json!({"q": "-escape escape" }), |response, code| {
+            assert_eq!(code, 200, "{}", response);
+            let hits = response["hits"].as_array().unwrap();
+            assert_eq!(hits.len(), 1);
+            assert_eq!(hits[0]["id"], "450465");
+        })
+        .await;
+}
+
 #[cfg(feature = "default")]
 #[actix_rt::test]
 async fn test_kanji_language_detection() {
@@ -936,6 +1040,7 @@ async fn experimental_feature_vector_store() {
     let (response, code) = index
         .search_post(json!({
             "vector": [1.0, 2.0, 3.0],
+            "showRankingScore": true
         }))
         .await;
     meili_snap::snapshot!(code, @"400 Bad Request");
@@ -978,6 +1083,7 @@ async fn experimental_feature_vector_store() {
     let (response, code) = index
         .search_post(json!({
             "vector": [1.0, 2.0, 3.0],
+            "showRankingScore": true,
         }))
         .await;
 
@@ -995,7 +1101,7 @@ async fn experimental_feature_vector_store() {
             3
           ]
         },
-        "_semanticScore": 1.0
+        "_rankingScore": 1.0
       },
       {
         "title": "Captain Marvel",
@@ -1007,7 +1113,7 @@ async fn experimental_feature_vector_store() {
             54
           ]
         },
-        "_semanticScore": 0.9129112
+        "_rankingScore": 0.9129111766815186
       },
       {
         "title": "Gläss",
@@ -1019,7 +1125,7 @@ async fn experimental_feature_vector_store() {
             90
           ]
         },
-        "_semanticScore": 0.8106413
+        "_rankingScore": 0.8106412887573242
       },
       {
         "title": "How to Train Your Dragon: The Hidden World",
@@ -1031,7 +1137,7 @@ async fn experimental_feature_vector_store() {
             32
           ]
         },
-        "_semanticScore": 0.74120104
+        "_rankingScore": 0.7412010431289673
       },
       {
         "title": "Escape Room",
@@ -1042,7 +1148,8 @@ async fn experimental_feature_vector_store() {
             -23,
             32
           ]
-        }
+        },
+        "_rankingScore": 0.6972063183784485
       }
     ]
     "###);
