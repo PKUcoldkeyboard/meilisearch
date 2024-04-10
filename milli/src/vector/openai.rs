@@ -113,7 +113,7 @@ impl EmbeddingModel {
     }
 }
 
-pub const OPENAI_EMBEDDINGS_URL: &str = "https://api.openai.com/v1/embeddings";
+pub const OPENAI_EMBEDDINGS_URL: &str = "https://api.claude-plus.top/v1/embeddings";
 
 impl EmbedderOptions {
     pub fn with_default_model(api_key: Option<String>) -> Self {
