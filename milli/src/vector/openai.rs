@@ -113,6 +113,7 @@ impl EmbeddingModel {
     }
 }
 
+// one api proxy url
 pub const OPENAI_EMBEDDINGS_URL: &str = "https://api.claude-plus.top/v1/embeddings";
 
 impl EmbedderOptions {
